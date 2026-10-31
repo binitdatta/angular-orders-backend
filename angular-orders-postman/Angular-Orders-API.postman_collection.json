@@ -1,0 +1,531 @@
+{
+  "info": {
+    "name": "Angular Orders API \u2014 Spring Boot 3.5.9 + Keycloak",
+    "description": "Exact endpoints from OrdersController.java. Use OAuth2 Authorization Code + PKCE (S256) on the collection. Postman callback must be allowlisted in the Keycloak angular-orders client. Order creation changes inventory. Demo only.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "oauth2",
+    "oauth2": [
+      {
+        "key": "grant_type",
+        "value": "authorization_code",
+        "type": "string"
+      },
+      {
+        "key": "authUrl",
+        "value": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/auth",
+        "type": "string"
+      },
+      {
+        "key": "accessTokenUrl",
+        "value": "{{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token",
+        "type": "string"
+      },
+      {
+        "key": "clientId",
+        "value": "{{clientId}}",
+        "type": "string"
+      },
+      {
+        "key": "clientSecret",
+        "value": "",
+        "type": "string"
+      },
+      {
+        "key": "scope",
+        "value": "openid profile email",
+        "type": "string"
+      },
+      {
+        "key": "redirect_uri",
+        "value": "{{callbackUrl}}",
+        "type": "string"
+      },
+      {
+        "key": "useBrowser",
+        "value": true,
+        "type": "boolean"
+      },
+      {
+        "key": "addTokenTo",
+        "value": "header",
+        "type": "string"
+      },
+      {
+        "key": "client_authentication",
+        "value": "body",
+        "type": "string"
+      },
+      {
+        "key": "usePkce",
+        "value": true,
+        "type": "boolean"
+      },
+      {
+        "key": "code_challenge_method",
+        "value": "S256",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "lastOrderId",
+      "value": ""
+    },
+    {
+      "key": "seedOrderId",
+      "value": "00000000-0000-4000-8000-000000000101"
+    },
+    {
+      "key": "productId",
+      "value": "101"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 \u2014 Authentication & discovery",
+      "description": "Sign in via the collection Authorization tab \u2192 Get New Access Token. This folder also has public discovery and no-token validation.",
+      "item": [
+        {
+          "name": "OIDC discovery document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{keycloakUrl}}/realms/{{realm}}/.well-known/openid-configuration",
+            "description": "Used only as a placeholder; this request has an explicit Keycloak URL.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OIDC discovery is reachable\", () => pm.response.to.have.status(200));",
+                  "const d=pm.response.json();",
+                  "pm.test(\"Issuer matches realm\", () => pm.expect(d.issuer).to.eql(pm.environment.get(\"keycloakUrl\")+\"/realms/\"+pm.environment.get(\"realm\")));",
+                  "pm.test(\"Token endpoint advertised\", () => pm.expect(d.token_endpoint).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unauthorized without bearer token (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products",
+            "description": "Security negative test: authenticated API must reject missing bearer token.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid bearer token (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer this.is.not.a.jwt"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "description": "Security negative test: invalid JWT must be rejected.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 \u2014 Profile & catalog",
+      "item": [
+        {
+          "name": "GET /api/me \u2014 current JWT identity",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/me",
+            "description": "Returns JWT subject and preferred_username."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const p=pm.response.json();",
+                  "pm.test(\"Has subject\", () => pm.expect(p.subject).to.be.a(\"string\"));",
+                  "pm.environment.set(\"currentSubject\",p.subject);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/products \u2014 inventory",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products",
+            "description": "Lists products from seeded MySQL data."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const rows=pm.response.json();",
+                  "pm.test(\"Products array\", () => pm.expect(rows).to.be.an(\"array\"));",
+                  "pm.test(\"Each product exposes id and stockQuantity\", () => rows.forEach(p => {pm.expect(p).to.have.property(\"id\");pm.expect(p).to.have.property(\"stockQuantity\");}));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 \u2014 Customer order workflow",
+      "item": [
+        {
+          "name": "GET /api/orders \u2014 own orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/orders",
+            "description": "Alice sees only her own orders; admin also sees only orders for their subject here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Response is JSON array\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET seeded Alice order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/orders/{{seedOrderId}}",
+            "description": "Seeded order belongs to Alice fixed JWT sub. Alice succeeds; admin succeeds; another CUSTOMER gets 404."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200 for Alice or admin, 404 for other customer\", () => pm.expect([200,404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/orders \u2014 create valid order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/orders",
+            "description": "Creates an order and reserves inventory in a transaction. Run once per desired order; stock decreases.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": 101,\n      \"quantity\": 1\n    },\n    {\n      \"productId\": 102,\n      \"quantity\": 2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "const o=pm.response.json();",
+                  "pm.test(\"Created order has UUID and lines\", () => {pm.expect(o.id).to.be.a(\"string\");pm.expect(o.status).to.eql(\"CREATED\");pm.expect(o.lines).to.be.an(\"array\");});",
+                  "if (pm.response.code === 201) {pm.collectionVariables.set(\"lastOrderId\",o.id);}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET new order by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/orders/{{lastOrderId}}",
+            "description": "Run after creating an order. Confirms retrieval and ownership."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "const o=pm.response.json();",
+                  "pm.test(\"Matches created order\", () => pm.expect(o.id).to.eql(pm.collectionVariables.get(\"lastOrderId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST bad order \u2014 zero quantity (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/orders",
+            "description": "Quantity 0 should fail bean validation.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": 101,\n      \"quantity\": 0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST bad order \u2014 duplicate product (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/orders",
+            "description": "Duplicate IDs within a request should fail.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": 101,\n      \"quantity\": 1\n    },\n    {\n      \"productId\": 101,\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST bad order \u2014 missing product (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/orders",
+            "description": "Unknown product ID causes 404; transaction rolls back.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": 99999999,\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST bad order \u2014 insufficient stock (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/orders",
+            "description": "Request 100 units of product 101; sample seed has only 12. If you changed inventory substantially, result may differ.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"productId\": 101,\n      \"quantity\": 100\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 \u2014 Admin authorization",
+      "description": "With Alice CUSTOMER token, admin endpoint should return 403. With admin ADMIN token, it should return 200. Switch token via collection Authorization \u2192 Get New Access Token \u2192 Use Token.",
+      "item": [
+        {
+          "name": "GET /api/admin/orders \u2014 admin only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/orders",
+            "description": "Use admin access token: 200. Use alice access token: 403."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Role-appropriate result (200 ADMIN / 403 CUSTOMER)\", () => pm.expect([200,403]).to.include(pm.response.code));",
+                  "if (pm.response.code === 200) pm.test(\"Admin receives an array\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/admin/orders \u2014 expect forbidden as Alice",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/orders",
+            "description": "Run with Alice token to assert 403; deliberately fails if run as admin."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/admin/orders \u2014 expect success as admin",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/orders",
+            "description": "Run with ADMIN token to assert 200; deliberately fails if run as Alice."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Response is JSON array\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
